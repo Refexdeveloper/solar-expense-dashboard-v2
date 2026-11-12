@@ -1,0 +1,207 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    --bg-base: #f6f7f9;
+    --bg-accent: #f0fdfa;
+    --card: #ffffff;
+    --text-main: #0f172a;
+    --text-muted: #64748b;
+    --border-soft: rgba(148, 163, 184, 0.2);
+    --it-brand: #0d9488;
+    --it-brand-primary: #0d9488;
+    --it-brand-soft: #f0fdfa;
+    --font-body: 'Inter', 'Plus Jakarta Sans', system-ui, sans-serif;
+    --font-heading: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+}
+
+/*
+ * Kissflow runtime sets fixed container height + overflow-x:hidden on outer wrappers; the iframe
+ * often ends up with stacked scrollbars (host + container + document). Fix inside our bundle only:
+ * - Never scroll `html`/`body` — they fill the iframe height with overflow hidden.
+ * - Exactly one scrollport: `.rootDiv` (matches the idea of clipping X, scrolling Y in one place).
+ * - overscroll-behavior: contain — reduces scroll chaining to Kissflow parents.
+ */
+html {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+}
+
+body {
+    margin: 0;
+    min-width: 320px;
+    height: 100%;
+    overflow: hidden;
+    font-family: var(--font-body);
+    background:
+        radial-gradient(ellipse 70% 50% at 0% 0%, rgba(13, 148, 136, 0.03) 0%, transparent 55%),
+        radial-gradient(ellipse 50% 40% at 100% 0%, rgba(16, 185, 129, 0.02) 0%, transparent 50%),
+        var(--bg-base);
+    color: var(--text-main);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+    width: 100%;
+    max-width: 100vw;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.rootDiv {
+    flex: 1 1 0%;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+* {
+    -webkit-tap-highlight-color: transparent;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.6) transparent;
+}
+
+.font-display {
+    font-family: var(--font-heading);
+}
+
+@keyframes it-fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.animate-fade-in {
+    animation: it-fade-in 0.45s ease-out forwards;
+}
+
+.dashboard-header {
+    position: relative;
+    overflow: hidden;
+    background: url('https://images.unsplash.com/photo-1509391366360-2e959784a276?auto=format&fit=crop&w=1600&q=80')
+        center center / cover no-repeat;
+    box-shadow: 0 8px 28px rgba(15, 60, 50, 0.18);
+    border-radius: 16px;
+    min-height: 118px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.dashboard-header-inner {
+    position: relative;
+    z-index: 10;
+    overflow: visible;
+}
+
+.dashboard-header::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+        90deg,
+        rgba(15, 70, 62, 0.82) 0%,
+        rgba(15, 80, 70, 0.58) 32%,
+        rgba(20, 90, 75, 0.28) 52%,
+        rgba(255, 255, 255, 0.02) 72%,
+        transparent 100%
+    );
+    pointer-events: none;
+}
+
+.welcome-avatar-badge {
+    background: #ffffff;
+    border-radius: 9999px;
+    padding: 4px;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+}
+
+.welcome-title {
+    color: #ffffff;
+    text-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+    letter-spacing: -0.02em;
+}
+
+.welcome-subtitle {
+    color: rgba(255, 255, 255, 0.92);
+    font-weight: 400;
+}
+
+.header-fab-zone {
+    position: relative;
+    z-index: 20;
+    overflow: visible;
+}
+
+/* Create FAB — preserved from prior solar header */
+.header-fab-btn {
+    background: #ffffff;
+    border: 2px solid #059669;
+    color: #0f766e;
+    box-shadow:
+        0 0 0 4px rgba(255, 255, 255, 0.85),
+        0 6px 20px rgba(15, 23, 42, 0.28);
+}
+
+.header-fab-btn.is-open {
+    background: #ffffff;
+    color: #0d9488;
+    box-shadow:
+        0 0 0 5px rgba(255, 255, 255, 0.95),
+        0 8px 24px rgba(15, 23, 42, 0.32);
+}
+
+.header-fab-btn .ri-add-line {
+    color: #059669;
+}
+
+.header-fab-pill {
+    background: linear-gradient(180deg, #0f766e 0%, #0d5c56 100%);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(15, 70, 62, 0.35);
+}
+
+.header-fab-pill:hover {
+    background: linear-gradient(180deg, #0d9488 0%, #0f766e 100%);
+}
+
+@keyframes ping-once {
+    0% {
+        transform: scale(1);
+        opacity: 0.6;
+    }
+    80% {
+        transform: scale(2.2);
+        opacity: 0;
+    }
+    100% {
+        transform: scale(2.2);
+        opacity: 0;
+    }
+}
+
+.animate-ping-once {
+    animation: ping-once 0.55s cubic-bezier(0.4, 0, 0.6, 1) forwards;
+}
+
+.satellite-pill {
+    transition: all 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}
+
+.satellite-pill:hover {
+    filter: brightness(1.05);
+}

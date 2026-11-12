@@ -1,0 +1,790 @@
+/* eslint-disable react-refresh/only-export-components -- period picker + range helpers */
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { CalendarRange, ChevronDown, Check } from 'lucide-react'
+
+function padDateInput(date) {
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, '0')
+    const d = String(date.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+}
+
+function startOfDay(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+function getMonday(date = new Date()) {
+    const d = startOfDay(date)
+    const day = d.getDay()
+    const diff = day === 0 ? -6 : 1 - day
+    d.setDate(d.getDate() + diff)
+    return d
+}
+
+function formatShortDate(date) {
+    return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function formatMonthLabel(year, monthIndex) {
+    return new Date(year, monthIndex, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+}
+
+function formatDdMmYyyy(iso) {
+    if (!iso) return ''
+    const [y, m, d] = String(iso).split('-')
+    if (!y || !m || !d) return iso
+    return `${d}-${m}-${y}`
+}
+
+/** Indian FY start year for a reference date (Apr–Mar). */
+export function getFyStartYear(referenceDate = new Date()) {
+    const d = referenceDate instanceof Date ? referenceDate : new Date()
+    return d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1
+}
+
+export function getFinancialYearRange(fyStartYear, { capToToday = true } = {}) {
+    const from = new Date(fyStartYear, 3, 1)
+    let to = new Date(fyStartYear + 1, 2, 31)
+    if (capToToday) {
+        const today = startOfDay(new Date())
+        if (to > today) to = today
+    }
+    return { from: padDateInput(from), to: padDateInput(to), fyStartYear }
+}
+
+/** Indian FY quarters: Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar. */
+export function getQuarterRange(fyStartYear, quarter, { capToToday = true } = {}) {
+    const q = Math.min(4, Math.max(1, Number(quarter) || 1))
+    const startMonth = 3 + (q - 1) * 3
+    const from = new Date(fyStartYear, startMonth, 1)
+    let to = new Date(fyStartYear, startMonth + 3, 0)
+    if (capToToday) {
+        const today = startOfDay(new Date())
+        if (to > today) to = today
+    }
+    return { from: padDateInput(from), to: padDateInput(to), fyStartYear, quarter: q }
+}
+
+/** Indian FY halves: H1 Apr–Sep, H2 Oct–Mar. */
+export function getHalfYearRange(fyStartYear, half, { capToToday = true } = {}) {
+    const h = half === 2 || half === 'H2' || half === 'h2' ? 2 : 1
+    const from = h === 1 ? new Date(fyStartYear, 3, 1) : new Date(fyStartYear, 9, 1)
+    let to = h === 1 ? new Date(fyStartYear, 8, 30) : new Date(fyStartYear + 1, 2, 31)
+    if (capToToday) {
+        const today = startOfDay(new Date())
+        if (to > today) to = today
+    }
+    return { from: padDateInput(from), to: padDateInput(to), fyStartYear, half: h }
+}
+
+const QUARTER_META = [
+    { quarter: 1, label: 'Q1', months: 'Apr–Jun' },
+    { quarter: 2, label: 'Q2', months: 'Jul–Sep' },
+    { quarter: 3, label: 'Q3', months: 'Oct–Dec' },
+    { quarter: 4, label: 'Q4', months: 'Jan–Mar' },
+]
+
+export function buildQuarterOptions(fyStartYear) {
+    const now = startOfDay(new Date())
+    const fyLabel = `FY ${fyStartYear}–${String(fyStartYear + 1).slice(-2)}`
+    return QUARTER_META.map((meta) => {
+        const uncapped = getQuarterRange(fyStartYear, meta.quarter, { capToToday: false })
+        const fromDate = new Date(`${uncapped.from}T12:00:00`)
+        if (fromDate > now) return null
+        const range = getQuarterRange(fyStartYear, meta.quarter, { capToToday: true })
+        const isCurrent = now >= fromDate && now <= new Date(`${uncapped.to}T23:59:59`)
+        return {
+            key: `q:${fyStartYear}:${meta.quarter}`,
+            label: `${meta.label} · ${meta.months}`,
+            sub: `${formatShortDate(new Date(`${uncapped.from}T12:00:00`))} → ${
+                isCurrent ? 'Today' : formatShortDate(new Date(`${uncapped.to}T12:00:00`))
+            }`,
+            hint: isCurrent ? 'Current quarter' : fyLabel,
+            range: { from: range.from, to: range.to },
+            quarter: meta.quarter,
+        }
+    }).filter(Boolean)
+}
+
+export function buildHalfYearOptions(fyStartYear) {
+    const now = startOfDay(new Date())
+    const fyLabel = `FY ${fyStartYear}–${String(fyStartYear + 1).slice(-2)}`
+    const halves = [
+        {
+            half: 1,
+            label: 'H1',
+            months: 'April – September',
+            uncapped: getHalfYearRange(fyStartYear, 1, { capToToday: false }),
+        },
+        {
+            half: 2,
+            label: 'H2',
+            months: 'October – March',
+            uncapped: getHalfYearRange(fyStartYear, 2, { capToToday: false }),
+        },
+    ]
+    return halves
+        .map((meta) => {
+            const fromDate = new Date(`${meta.uncapped.from}T12:00:00`)
+            if (fromDate > now) return null
+            const range = getHalfYearRange(fyStartYear, meta.half, { capToToday: true })
+            const isCurrent = now >= fromDate && now <= new Date(`${meta.uncapped.to}T23:59:59`)
+            return {
+                key: `h:${fyStartYear}:${meta.half}`,
+                label: `${meta.label} · ${meta.months}`,
+                sub: `${formatShortDate(new Date(`${meta.uncapped.from}T12:00:00`))} → ${
+                    isCurrent ? 'Today' : formatShortDate(new Date(`${meta.uncapped.to}T12:00:00`))
+                }`,
+                hint: isCurrent ? 'Current half' : fyLabel,
+                range: { from: range.from, to: range.to },
+                half: meta.half,
+            }
+        })
+        .filter(Boolean)
+}
+
+export function getWeekRange(mondayDate, { capToToday = true } = {}) {
+    const from = startOfDay(mondayDate)
+    let to = new Date(from)
+    to.setDate(to.getDate() + 6)
+    if (capToToday) {
+        const today = startOfDay(new Date())
+        if (to > today) to = today
+    }
+    return { from: padDateInput(from), to: padDateInput(to), monday: from }
+}
+
+export function getMonthRange(year, monthIndex, { capToToday = true } = {}) {
+    const from = new Date(year, monthIndex, 1)
+    let to = new Date(year, monthIndex + 1, 0)
+    if (capToToday) {
+        const today = startOfDay(new Date())
+        if (to > today) to = today
+    }
+    return { from: padDateInput(from), to: padDateInput(to), year, monthIndex }
+}
+
+export function getTodayRange() {
+    const today = padDateInput(startOfDay(new Date()))
+    return { from: today, to: today }
+}
+
+export function getMtdRange() {
+    const now = new Date()
+    return getMonthRange(now.getFullYear(), now.getMonth(), { capToToday: true })
+}
+
+export function getQtdRange() {
+    const fy = getFyStartYear()
+    const month = new Date().getMonth()
+    // Indian FY quarter from calendar month
+    let quarter = 1
+    if (month >= 3 && month <= 5) quarter = 1
+    else if (month >= 6 && month <= 8) quarter = 2
+    else if (month >= 9 && month <= 11) quarter = 3
+    else quarter = 4
+    return getQuarterRange(fy, quarter, { capToToday: true })
+}
+
+/** Weeks of a calendar month (Mon–Sun), up through the current week only. */
+export function buildMonthWeekOptions(year, monthIndex) {
+    const now = new Date()
+    const currentMonday = getMonday(now)
+    const monthStart = new Date(year, monthIndex, 1)
+    const monthEnd = new Date(year, monthIndex + 1, 0)
+    let monday = getMonday(monthStart)
+
+    const make = (weekMonday, { label, hint, weekNumber, capToToday }) => {
+        const range = getWeekRange(weekMonday, { capToToday })
+        const weekEnd = new Date(weekMonday)
+        weekEnd.setDate(weekEnd.getDate() + 6)
+        const toLabel =
+            capToToday && padDateInput(weekEnd) > padDateInput(startOfDay(now))
+                ? 'Today'
+                : `Sun ${formatShortDate(weekEnd)}`
+        return {
+            key: `week:${range.from}`,
+            label,
+            sub: `Mon ${formatShortDate(weekMonday)} → ${toLabel}`,
+            hint,
+            weekNumber,
+            range: { from: range.from, to: range.to },
+            monday: padDateInput(weekMonday),
+        }
+    }
+
+    const options = []
+    let weekNumber = 0
+    for (let i = 0; i < 6; i += 1) {
+        const weekEnd = new Date(monday)
+        weekEnd.setDate(weekEnd.getDate() + 6)
+        const overlapsMonth = weekEnd >= monthStart && monday <= monthEnd
+        if (monday > monthEnd) break
+
+        if (overlapsMonth) {
+            if (monday.getTime() > currentMonday.getTime()) break
+            weekNumber += 1
+            const isCurrent = monday.getTime() === currentMonday.getTime()
+            const prevMonday = new Date(currentMonday)
+            prevMonday.setDate(prevMonday.getDate() - 7)
+            const isPrevious = monday.getTime() === prevMonday.getTime()
+
+            let label = `Week ${weekNumber}`
+            let hint = formatMonthLabel(year, monthIndex)
+            if (isCurrent) {
+                label = 'Current week'
+                hint = 'This week'
+            } else if (isPrevious) {
+                label = 'Previous week'
+                hint = 'Last week'
+            }
+
+            options.push(
+                make(monday, {
+                    label,
+                    hint,
+                    weekNumber,
+                    capToToday: isCurrent,
+                })
+            )
+        }
+
+        monday = new Date(monday)
+        monday.setDate(monday.getDate() + 7)
+    }
+
+    return options.reverse()
+}
+
+export function buildWeekNavOptions({ year, monthIndex } = {}) {
+    const now = new Date()
+    const y = Number.isFinite(year) ? year : now.getFullYear()
+    const m = Number.isFinite(monthIndex) ? monthIndex : now.getMonth()
+    return buildMonthWeekOptions(y, m)
+}
+
+/** @deprecated Prefer buildWeekNavOptions */
+export function buildRecentWeekOptions(count = 8) {
+    void count
+    return buildWeekNavOptions()
+}
+
+export function getCurrentWeekPeriodState() {
+    const now = new Date()
+    const options = buildWeekNavOptions({
+        year: now.getFullYear(),
+        monthIndex: now.getMonth(),
+    })
+    const current = options.find((opt) => opt.label === 'Current week') || options[options.length - 1]
+    if (!current) {
+        const monday = getMonday(now)
+        const range = getWeekRange(monday, { capToToday: true })
+        return {
+            mode: 'weekly',
+            range: { from: range.from, to: range.to },
+            summaryLabel: `Current week · Mon ${formatShortDate(monday)} → Today`,
+        }
+    }
+    return {
+        mode: 'weekly',
+        range: { from: current.range.from, to: current.range.to },
+        summaryLabel: `${current.label} · ${current.sub}`,
+    }
+}
+
+export function buildMonthOptions(year) {
+    const now = new Date()
+    const options = []
+    for (let monthIndex = 0; monthIndex < 12; monthIndex += 1) {
+        if (year > now.getFullYear()) continue
+        if (year === now.getFullYear() && monthIndex > now.getMonth()) continue
+        const range = getMonthRange(year, monthIndex)
+        const isCurrent = year === now.getFullYear() && monthIndex === now.getMonth()
+        options.push({
+            key: `month:${year}-${monthIndex}`,
+            label: formatMonthLabel(year, monthIndex),
+            sub: isCurrent
+                ? `1 ${new Date(year, monthIndex, 1).toLocaleDateString(undefined, { month: 'short' })} → Today`
+                : 'Full month',
+            range: { from: range.from, to: range.to },
+        })
+    }
+    return options
+}
+
+export function buildFinancialYearOptions(count = 4) {
+    const currentFy = getFyStartYear()
+    const options = []
+    for (let i = 0; i < count; i += 1) {
+        const fyStartYear = currentFy - i
+        const range = getFinancialYearRange(fyStartYear)
+        const label = `FY ${fyStartYear}–${String(fyStartYear + 1).slice(-2)}`
+        options.push({
+            key: `fy:${fyStartYear}`,
+            label,
+            sub: `1 Apr ${fyStartYear} → 31 Mar ${fyStartYear + 1}`,
+            hint: i === 0 ? 'Current financial year' : undefined,
+            range: { from: range.from, to: range.to },
+        })
+    }
+    return options
+}
+
+const MODE_OPTIONS = [
+    { key: 'weekly', label: 'Week' },
+    { key: 'monthly', label: 'Month' },
+    { key: 'fy', label: 'FY' },
+    { key: 'custom', label: 'Custom' },
+]
+
+function itSegmentShell(extra = '') {
+    return `grid grid-cols-4 gap-0.5 rounded-lg border border-slate-200 bg-slate-100 p-0.5 ${extra}`
+}
+
+function itSegmentBtn(active = false, extra = '') {
+    const base =
+        'inline-flex h-7 w-full items-center justify-center rounded-md px-1 text-[11px] font-semibold transition-colors duration-150 ease-out'
+    if (active) {
+        return `${base} bg-gradient-to-r from-[#0d9488] to-[#059669] text-white shadow-sm shadow-[#0d9488]/15 ${extra}`
+    }
+    return `${base} text-slate-600 hover:bg-white hover:text-[#0f766e] ${extra}`
+}
+
+function resolvePanelMode(mode) {
+    if (mode === 'custom' || mode === 'today') return 'custom'
+    if (mode === 'weekly') return 'weekly'
+    if (mode === 'monthly' || mode === 'mtd') return 'monthly'
+    if (mode === 'fy' || mode === 'year' || mode === 'quarterly' || mode === 'half' || mode === 'qtd') {
+        return 'fy'
+    }
+    return 'fy'
+}
+
+/**
+ * Compact period control — Week / Month / FY / Custom only.
+ */
+export default function ITApproverPeriodPicker({
+    mode = 'fy',
+    range = { from: '', to: '' },
+    summaryLabel = '',
+    onChange,
+    className = '',
+}) {
+    const [open, setOpen] = useState(false)
+    const [panelMode, setPanelMode] = useState(() => resolvePanelMode(mode))
+    const [monthYear, setMonthYear] = useState(() => new Date().getFullYear())
+    const [weekMonthCursor, setWeekMonthCursor] = useState(() => {
+        const now = new Date()
+        return { year: now.getFullYear(), monthIndex: now.getMonth() }
+    })
+    const [customFrom, setCustomFrom] = useState(range?.from || '')
+    const [customTo, setCustomTo] = useState(range?.to || '')
+    const [panelStyle, setPanelStyle] = useState(null)
+    const rootRef = useRef(null)
+    const panelRef = useRef(null)
+
+    const todayIso = padDateInput(startOfDay(new Date()))
+
+    useEffect(() => {
+        if (!open) return undefined
+        setPanelMode(resolvePanelMode(mode))
+        setCustomFrom(range?.from || '')
+        setCustomTo(range?.to || '')
+        if (mode === 'weekly' && range?.from) {
+            const anchor = new Date(`${range.from}T12:00:00`)
+            if (!Number.isNaN(anchor.getTime())) {
+                setWeekMonthCursor({ year: anchor.getFullYear(), monthIndex: anchor.getMonth() })
+            }
+        }
+        const onDoc = (event) => {
+            if (rootRef.current?.contains(event.target)) return
+            if (panelRef.current?.contains(event.target)) return
+            setOpen(false)
+        }
+        document.addEventListener('mousedown', onDoc)
+        return () => document.removeEventListener('mousedown', onDoc)
+    }, [open, mode, range?.from, range?.to])
+
+    useEffect(() => {
+        if (!open || !rootRef.current) {
+            setPanelStyle(null)
+            return undefined
+        }
+        const update = () => {
+            if (!rootRef.current) return
+            const rect = rootRef.current.getBoundingClientRect()
+            const width = Math.min(22 * 16, Math.max(rect.width, 320), window.innerWidth - 24)
+            let left = rect.right - width
+            if (left < 12) left = 12
+            if (left + width > window.innerWidth - 12) left = Math.max(12, window.innerWidth - width - 12)
+            setPanelStyle({
+                position: 'fixed',
+                top: `${rect.bottom + 8}px`,
+                left: `${left}px`,
+                width: `${width}px`,
+                zIndex: 10000,
+            })
+        }
+        update()
+        window.addEventListener('scroll', update, true)
+        window.addEventListener('resize', update)
+        return () => {
+            window.removeEventListener('scroll', update, true)
+            window.removeEventListener('resize', update)
+        }
+    }, [open])
+
+    const weekOptions = useMemo(
+        () =>
+            buildWeekNavOptions({
+                year: weekMonthCursor.year,
+                monthIndex: weekMonthCursor.monthIndex,
+            }),
+        [open, weekMonthCursor.year, weekMonthCursor.monthIndex]
+    )
+    const monthOptions = useMemo(() => buildMonthOptions(monthYear), [monthYear, open])
+    const fyOptions = useMemo(() => buildFinancialYearOptions(4), [open])
+
+    const triggerLabel = summaryLabel || 'Select period'
+
+    const applySelection = (nextMode, nextRange, label) => {
+        onChange?.({
+            mode: nextMode,
+            range: nextRange,
+            summaryLabel: label,
+        })
+        setOpen(false)
+    }
+
+    const applyCustom = () => {
+        const from = String(customFrom || '').trim()
+        const to = String(customTo || '').trim()
+        if (!from || !to) return
+        const start = from <= to ? from : to
+        const end = from <= to ? to : from
+        const cappedEnd = end > todayIso ? todayIso : end
+        applySelection(
+            'custom',
+            { from: start, to: cappedEnd },
+            `${formatDdMmYyyy(start)} → ${formatDdMmYyyy(cappedEnd)}`
+        )
+    }
+
+    const shiftWeekMonth = (delta) => {
+        setWeekMonthCursor((prev) => {
+            const d = new Date(prev.year, prev.monthIndex + delta, 1)
+            const now = new Date()
+            if (
+                d.getFullYear() > now.getFullYear() ||
+                (d.getFullYear() === now.getFullYear() && d.getMonth() > now.getMonth())
+            ) {
+                return { year: now.getFullYear(), monthIndex: now.getMonth() }
+            }
+            return { year: d.getFullYear(), monthIndex: d.getMonth() }
+        })
+    }
+
+    const canShiftWeekMonthForward = (() => {
+        const now = new Date()
+        return (
+            weekMonthCursor.year < now.getFullYear() ||
+            (weekMonthCursor.year === now.getFullYear() && weekMonthCursor.monthIndex < now.getMonth())
+        )
+    })()
+
+    const customValid = Boolean(customFrom && customTo)
+
+    const dropdownPanel =
+        open && panelStyle && typeof document !== 'undefined'
+            ? createPortal(
+                  <div
+                      ref={panelRef}
+                      style={panelStyle}
+                      className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl"
+                      onMouseDown={(e) => e.stopPropagation()}
+                  >
+                      <div className="border-b border-slate-100 px-2.5 py-2.5">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
+                              Period type
+                          </p>
+                          <div className={`mt-1.5 ${itSegmentShell()}`}>
+                              {MODE_OPTIONS.map((opt) => (
+                                  <button
+                                      key={opt.key}
+                                      type="button"
+                                      title={
+                                          opt.key === 'weekly'
+                                              ? 'Weekly'
+                                              : opt.key === 'monthly'
+                                                ? 'Monthly'
+                                                : opt.key === 'fy'
+                                                  ? 'Financial Year'
+                                                  : 'Custom date range'
+                                      }
+                                      onClick={() => {
+                                          setPanelMode(opt.key)
+                                          if (opt.key === 'weekly') {
+                                              const now = new Date()
+                                              setWeekMonthCursor({
+                                                  year: now.getFullYear(),
+                                                  monthIndex: now.getMonth(),
+                                              })
+                                              onChange?.(getCurrentWeekPeriodState())
+                                          }
+                                      }}
+                                      className={itSegmentBtn(panelMode === opt.key)}
+                                  >
+                                      {opt.label}
+                                  </button>
+                              ))}
+                          </div>
+                      </div>
+
+                      <div className="max-h-72 overflow-y-auto p-3">
+                          {panelMode === 'custom' ? (
+                              <div className="space-y-2">
+                                  <p className="text-[11px] font-medium text-slate-500">
+                                      Explicit date range · capped at today
+                                  </p>
+                                  <div className="grid grid-cols-2 gap-2">
+                                      <label className="min-w-0">
+                                          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                              Start
+                                          </span>
+                                          <input
+                                              type="date"
+                                              value={customFrom}
+                                              max={customTo || todayIso}
+                                              onChange={(e) => setCustomFrom(e.target.value)}
+                                              className="h-9 w-full rounded-xl border border-slate-200 bg-white px-2.5 text-xs text-slate-800 outline-none transition focus:border-[#0d9488] focus:ring-2 focus:ring-[#0d9488]/15"
+                                          />
+                                      </label>
+                                      <label className="min-w-0">
+                                          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                              End
+                                          </span>
+                                          <input
+                                              type="date"
+                                              value={customTo}
+                                              min={customFrom || undefined}
+                                              max={todayIso}
+                                              onChange={(e) => setCustomTo(e.target.value)}
+                                              className="h-9 w-full rounded-xl border border-slate-200 bg-white px-2.5 text-xs text-slate-800 outline-none transition focus:border-[#0d9488] focus:ring-2 focus:ring-[#0d9488]/15"
+                                          />
+                                      </label>
+                                  </div>
+                                  <button
+                                      type="button"
+                                      disabled={!customValid}
+                                      onClick={applyCustom}
+                                      className="inline-flex h-9 w-full items-center justify-center rounded-xl bg-gradient-to-r from-[#0d9488] to-[#059669] text-xs font-bold text-white shadow-sm transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-45"
+                                  >
+                                      Apply custom range
+                                  </button>
+                              </div>
+                          ) : null}
+
+                          {panelMode === 'weekly' ? (
+                              <div className="space-y-1.5">
+                                  <div className="mb-2 flex items-center justify-between gap-2">
+                                      <p className="text-[11px] font-medium text-slate-500">
+                                          Weeks in month · Mon → Sun
+                                      </p>
+                                      <div className="flex items-center gap-1">
+                                          <button
+                                              type="button"
+                                              className="rounded-md px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                                              onClick={() => shiftWeekMonth(-1)}
+                                          >
+                                              ←
+                                          </button>
+                                          <span className="min-w-[7rem] text-center text-xs font-bold text-slate-800">
+                                              {formatMonthLabel(weekMonthCursor.year, weekMonthCursor.monthIndex)}
+                                          </span>
+                                          <button
+                                              type="button"
+                                              className="rounded-md px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                                              disabled={!canShiftWeekMonthForward}
+                                              onClick={() => shiftWeekMonth(1)}
+                                          >
+                                              →
+                                          </button>
+                                      </div>
+                                  </div>
+                                  <p className="mb-1 text-[10px] font-medium text-slate-400">
+                                      {weekOptions.length} week{weekOptions.length === 1 ? '' : 's'} available · no
+                                      future weeks
+                                  </p>
+                                  {weekOptions.map((opt) => {
+                                      const active =
+                                          mode === 'weekly' &&
+                                          range.from === opt.range.from &&
+                                          range.to === opt.range.to
+                                      return (
+                                          <PeriodOptionRow
+                                              key={opt.key}
+                                              active={active}
+                                              label={opt.label}
+                                              sub={opt.sub}
+                                              hint={opt.hint}
+                                              onClick={() =>
+                                                  applySelection('weekly', opt.range, `${opt.label} · ${opt.sub}`)
+                                              }
+                                          />
+                                      )
+                                  })}
+                                  {!weekOptions.length ? (
+                                      <p className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
+                                          No weeks in this month yet.
+                                      </p>
+                                  ) : null}
+                              </div>
+                          ) : null}
+
+                          {panelMode === 'monthly' ? (
+                              <div className="space-y-2">
+                                  <div className="mb-2 flex items-center justify-between gap-2">
+                                      <p className="text-[11px] font-medium text-slate-500">
+                                          Calendar months · January → December
+                                      </p>
+                                      <div className="flex items-center gap-1">
+                                          <button
+                                              type="button"
+                                              className="rounded-md px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                                              onClick={() => setMonthYear((y) => y - 1)}
+                                          >
+                                              ←
+                                          </button>
+                                          <span className="min-w-[3.5rem] text-center text-xs font-bold text-slate-800">
+                                              {monthYear}
+                                          </span>
+                                          <button
+                                              type="button"
+                                              className="rounded-md px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                                              disabled={monthYear >= new Date().getFullYear()}
+                                              onClick={() =>
+                                                  setMonthYear((y) => Math.min(new Date().getFullYear(), y + 1))
+                                              }
+                                          >
+                                              →
+                                          </button>
+                                      </div>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                      {monthOptions.map((opt) => {
+                                          const active = mode === 'monthly' && range.from === opt.range.from
+                                          return (
+                                              <button
+                                                  key={opt.key}
+                                                  type="button"
+                                                  onClick={() => applySelection('monthly', opt.range, opt.label)}
+                                                  className={`rounded-xl border px-2.5 py-2 text-left transition ${
+                                                      active
+                                                          ? 'border-[#0d9488] bg-[#0d9488]/10'
+                                                          : 'border-slate-200 hover:border-[#0d9488]/40 hover:bg-slate-50'
+                                                  }`}
+                                              >
+                                                  <span className="block text-xs font-semibold text-slate-800">
+                                                      {opt.label.split(' ')[0]}
+                                                  </span>
+                                                  <span className="block text-[10px] font-medium text-slate-500">
+                                                      {opt.sub}
+                                                  </span>
+                                              </button>
+                                          )
+                                      })}
+                                  </div>
+                              </div>
+                          ) : null}
+
+                          {panelMode === 'fy' ? (
+                              <div className="space-y-1.5">
+                                  <p className="mb-2 text-[11px] font-medium text-slate-500">
+                                      Indian financial year · 1 April → 31 March next year
+                                  </p>
+                                  {fyOptions.map((opt) => {
+                                      const active = (mode === 'fy' || mode === 'year') && range.from === opt.range.from
+                                      return (
+                                          <PeriodOptionRow
+                                              key={opt.key}
+                                              active={active}
+                                              label={opt.label}
+                                              sub={opt.sub}
+                                              hint={opt.hint}
+                                              onClick={() =>
+                                                  applySelection('fy', opt.range, `${opt.label} · Apr–Mar`)
+                                              }
+                                          />
+                                      )
+                                  })}
+                              </div>
+                          ) : null}
+                      </div>
+                  </div>,
+                  document.body
+              )
+            : null
+
+    return (
+        <div ref={rootRef} className={`relative z-40 ${className}`}>
+            <button
+                type="button"
+                aria-expanded={open}
+                aria-label="Period filter"
+                data-testid="approver-period-picker"
+                onClick={() => setOpen((prev) => !prev)}
+                className="inline-flex w-full min-w-0 max-w-none items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left shadow-sm transition hover:border-[#0d9488]/40 hover:bg-[#0d9488]/5 sm:w-auto sm:min-w-[12.5rem] sm:max-w-[18rem]"
+            >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#0d9488]/10 text-[#0d9488]">
+                    <CalendarRange className="h-3.5 w-3.5" strokeWidth={2.25} />
+                </span>
+                <span className="min-w-0 flex-1">
+                    <span className="block text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
+                        Period
+                    </span>
+                    <span className="block truncate text-xs font-semibold text-slate-800">{triggerLabel}</span>
+                </span>
+                <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition ${open ? 'rotate-180' : ''}`} />
+            </button>
+
+            {dropdownPanel}
+        </div>
+    )
+}
+
+function PeriodOptionRow({ active, label, sub, hint, onClick }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className={`flex w-full items-start gap-2 rounded-xl border px-3 py-2.5 text-left transition ${
+                active
+                    ? 'border-[#0d9488] bg-[#0d9488]/10'
+                    : 'border-slate-200 hover:border-[#0d9488]/40 hover:bg-slate-50'
+            }`}
+        >
+            <span className="min-w-0 flex-1">
+                <span className="block text-xs font-semibold text-slate-800">{label}</span>
+                {sub ? <span className="mt-0.5 block text-[11px] font-medium text-slate-500">{sub}</span> : null}
+                {hint ? (
+                    <span className="mt-1 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+                        {hint}
+                    </span>
+                ) : null}
+            </span>
+            {active ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-[#0d9488]" /> : null}
+        </button>
+    )
+}
+
+/** Default state: current financial year (Apr → today / Mar). */
+export function getDefaultApproverPeriodState() {
+    const fyStartYear = getFyStartYear()
+    const range = getFinancialYearRange(fyStartYear)
+    return {
+        mode: 'fy',
+        range: { from: range.from, to: range.to },
+        summaryLabel: `FY ${fyStartYear}–${String(fyStartYear + 1).slice(-2)} · Apr–Mar`,
+    }
+}
